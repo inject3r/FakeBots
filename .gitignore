@@ -1,0 +1,10 @@
+# build trees
+build*/
+cmake-build-*/
+# python
+__pycache__/
+*.pyc
+# test servers: downloaded / prepared by tools/setup_test_servers.sh and samp/get_samp_server.sh
+/dist/
+tests/results/last-*.txt
+tests/results/FAILED-*

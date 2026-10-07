@@ -1,0 +1,20 @@
+LIBRARY "FakeBots"
+
+EXPORTS
+	Supports
+	Load
+	Unload
+	AmxLoad
+	AmxUnload
+	ProcessTick
+
+	; sampgdk callback-export contract (see src/callbacks/ServerHooks.cpp)
+	OnPublicCall
+	OnPlayerConnect
+	OnPlayerDisconnect
+	OnPlayerRequestClass
+	OnPlayerSpawn
+	OnPlayerDeath
+	OnPlayerStateChange
+	OnPlayerEnterVehicle
+	OnPlayerExitVehicle

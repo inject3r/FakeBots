@@ -1,0 +1,24 @@
+/* Linux export list. Only the documented SA-MP/open.mp plugin entry points and
+ * the sampgdk callback names are visible; everything else (RakNet, sampgdk,
+ * libstdc++, nlohmann/json ...) stays private so it can never clash with
+ * another plugin that statically links its own copy of the same library. */
+{
+  global:
+    Supports;
+    Load;
+    Unload;
+    AmxLoad;
+    AmxUnload;
+    ProcessTick;
+    OnPublicCall;
+    OnPlayerConnect;
+    OnPlayerDisconnect;
+    OnPlayerRequestClass;
+    OnPlayerSpawn;
+    OnPlayerDeath;
+    OnPlayerStateChange;
+    OnPlayerEnterVehicle;
+    OnPlayerExitVehicle;
+  local:
+    *;
+};

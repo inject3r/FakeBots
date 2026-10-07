@@ -1,0 +1,8 @@
+[
+  { "name": "FB_File_A", "skin": 12, "x": 2010.0, "y": 1343.0, "z": 15.37, "angle": 90.0 },
+  { "name": 12345, "skin": 5, "x": 1.0, "y": 2.0, "z": 3.0 },
+  { "name": "FB_File_B", "skin": "not-a-number", "x": 2012.0, "y": 1343.0, "z": 15.37 },
+  { "name": "FB_File_B", "skin": 13, "x": 2012.0, "y": 1343.0, "z": 15.37, "waypoints": [[2012.0, 1350.0, 15.37], ["bad", 1, 2], [1, 2]] },
+  "this is not an object",
+  { "skin": 3 }
+]

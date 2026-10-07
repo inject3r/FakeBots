@@ -1,0 +1,251 @@
+# =============================================================================
+#  FakeBots - release pipeline
+#
+#  Push a tag (git tag v3.2.0 && git push origin v3.2.0) and this workflow
+#
+#    1. audits the sources (the "bots are never NPCs" guard),
+#    2. builds the plugin for Linux (FakeBots.so) and Windows (FakeBots.dll), both 32-bit,
+#    3. starts a REAL open.mp server with the fresh Linux build and runs the bot tests against it
+#       (join, player count seen from outside, overfill, heading, create/destroy churn),
+#    4. packages everything a server owner needs and creates the GitHub release for the tag with
+#       the repository secret PERSONAL_TOKEN.
+#
+#  Setup (once): Settings -> Secrets and variables -> Actions -> New repository secret
+#                name PERSONAL_TOKEN, value = a personal access token that may create releases
+#                (classic: scope "repo"; fine-grained: "Contents: Read and write" on this repo).
+#
+#  "Run workflow" (workflow_dispatch) runs steps 1-3 on any branch and keeps the build as an
+#  artifact; it never publishes a release.
+# =============================================================================
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+# The release itself is created with PERSONAL_TOKEN, so the built-in token only reads the code.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The open.mp server the bots are tested against (Linux x86 build). Bump when testing a newer one.
+  OMP_SERVER_VERSION: v1.5.8.3079
+
+jobs:
+  # ---------------------------------------------------------------------------
+  audit:
+    name: Source audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No NPC code paths, no forbidden APIs
+        run: python3 tools/source_audit.py
+
+      - name: Tag matches the plugin version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          echo "tag: ${GITHUB_REF_NAME}   plugin reports: ${plugin_version}"
+          if [ "${plugin_version}" != "${tag_version}" ]; then
+            echo "::warning title=Tag and plugin version differ::The tag is ${GITHUB_REF_NAME} but src/core/Common.h says ${plugin_version}. The binaries will print ${plugin_version} when a server loads them."
+          fi
+
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Build (Linux x86)
+    needs: audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the 32-bit toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake gcc-multilib g++-multilib
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFAKEBOTS_BUILD_PROBE=ON
+
+      - name: Build
+        run: cmake --build build --parallel --target FakeBots rakprobe
+
+      - name: Check the result
+        run: |
+          file build/FakeBots.so
+          file build/FakeBots.so | grep -q 'ELF 32-bit LSB shared object, Intel 80386'
+          echo "--- shared libraries the plugin needs:"
+          readelf -d build/FakeBots.so | grep NEEDED || true
+          echo "--- exported plugin entry points:"
+          nm -D --defined-only build/FakeBots.so | grep -E ' (Supports|Load|Unload|AmxLoad|AmxUnload|ProcessTick)$'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86
+          path: |
+            build/FakeBots.so
+            build/rakprobe
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Build (Windows x86)
+    needs: audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the MinGW-w64 (i686) cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++-mingw-w64-i686
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Check the result (self-contained 32-bit DLL)
+        run: |
+          file build/FakeBots.dll
+          file build/FakeBots.dll | grep -q 'PE32 executable (DLL)'
+          imports="$(i686-w64-mingw32-objdump -p build/FakeBots.dll | sed -n 's/^.*DLL Name: //p' | sort -u)"
+          echo "--- DLLs the plugin imports:"
+          echo "${imports}"
+          # Only what every Windows has. A MinGW runtime DLL here would make the plugin fail to
+          # load on a server machine that does not ship it.
+          unexpected="$(echo "${imports}" | grep -viE '^(kernel32|ws2_32|msvcrt|user32|advapi32)\.dll$' || true)"
+          if [ -n "${unexpected}" ]; then
+            echo "::error title=Unexpected DLL dependency::${unexpected}"
+            exit 1
+          fi
+          echo "--- exported plugin entry points:"
+          i686-w64-mingw32-objdump -p build/FakeBots.dll | grep -E '\b(Supports|Load|Unload|AmxLoad|AmxUnload|ProcessTick)\b'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86
+          path: build/FakeBots.dll
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  smoke-test:
+    name: Live test (open.mp server)
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x86
+          path: artifacts
+
+      - name: Install the 32-bit runtime libraries the server needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libc6-i386 lib32stdc++6 lib32gcc-s1 lib32z1
+
+      - name: Download the open.mp server
+        run: |
+          mkdir -p srv
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o srv/omp.tar.gz \
+            "https://github.com/openmultiplayer/open.mp/releases/download/${OMP_SERVER_VERSION}/open.mp-linux-x86.tar.gz"
+          tar -xzf srv/omp.tar.gz -C srv
+          ls srv/Server
+          chmod +x srv/Server/omp-server srv/Server/qawno/pawncc artifacts/rakprobe
+
+      - name: Bots join, leave, and keep the server consistent
+        run: |
+          set -euo pipefail
+          run() { python3 tests/run_server_test.py --kind omp --server-dir "$PWD/srv/Server" \
+                    --plugin "$PWD/artifacts/FakeBots.so" --probe "$PWD/artifacts/rakprobe" "$@"; }
+          run --scenario basic    --bots 20  --hold 6    # whole Pawn API, 70+ assertions
+          run --scenario join     --bots 100 --hold 8    # 100 bots, player count seen from outside
+          run --scenario overfill --bots 20              # server full: a real player still gets in
+          run --scenario facing   --bots 1               # heading the server reports while walking
+          run --scenario churn    --bots 30  --rounds 4  # create/destroy rounds, thread/memory leak check
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-logs
+          path: tests/results/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-linux, build-windows, smoke-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+    steps:
+      - name: The PERSONAL_TOKEN secret exists
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error title=PERSONAL_TOKEN is not set::Create the repository secret PERSONAL_TOKEN (Settings -> Secrets and variables -> Actions) holding a token that may create releases, then re-run this workflow."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x86
+          path: artifacts/linux-x86
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x86
+          path: artifacts/windows-x86
+
+      - name: Package the release files
+        run: |
+          python3 tools/package_release.py --tag "${TAG}" \
+            --linux   artifacts/linux-x86/FakeBots.so \
+            --windows artifacts/windows-x86/FakeBots.dll \
+            --out dist
+          python3 tools/release_notes.py --tag "${TAG}" > notes.md
+          echo "--- release files:"
+          ls -la dist
+          echo "--- checksums:"
+          cat dist/SHA256SUMS.txt
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+
+      - name: Create (or update) the GitHub release
+        run: |
+          set -euo pipefail
+          # "v1.2.3-rc1", "1.0.0-beta" ... are pre-releases
+          prerelease=false
+          case "${TAG}" in *-*) prerelease=true ;; esac
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists - replacing its files and text."
+            gh release upload "${TAG}" dist/* --clobber
+            gh release edit "${TAG}" --title "FakeBots ${TAG}" --notes-file notes.md --prerelease="${prerelease}"
+          else
+            gh release create "${TAG}" dist/* \
+              --title "FakeBots ${TAG}" \
+              --notes-file notes.md \
+              --prerelease="${prerelease}" \
+              --verify-tag
+          fi
+          gh release view "${TAG}" --json url,assets --jq '"Released: \(.url)\n" + ([.assets[].name] | join("\n"))'
