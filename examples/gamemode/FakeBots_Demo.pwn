@@ -542,7 +542,10 @@ stock Demo_ApplyReplayFrame(index)
 
     if (gRecordMode[index] == 1)
     {
-        if (gReplayVehicle == FAKEBOTS_INVALID_ID || GetPlayerState(playerid) != PLAYER_STATE_DRIVER)
+        if (gReplayVehicle == FAKEBOTS_INVALID_ID
+            || !IsValidVehicle(gReplayVehicle)
+            || GetPlayerState(playerid) != PLAYER_STATE_DRIVER
+            || GetVehicleModel(gReplayVehicle) != gRecordVehicleModel[index])
         {
             Demo_DestroyReplayVehicle();
             gReplayVehicle = FakeBotPutInNewVehicle(
