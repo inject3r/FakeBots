@@ -171,13 +171,18 @@ forward Demo_ReplayTick();
 
 stock Demo_ReadConfig()
 {
-    new File:f = fopen(DEMO_CFG, io_read);
+    File:f = fopen(DEMO_CFG, io_read);
     if (!f) return 0;
+
     new line[32];
     if (fread(f, line) && strval(line) > 0) gStartBots = strval(line);
     if (fread(f, line) && strval(line) > 0) gReportSeconds = strval(line);
     if (fread(f, line)) gAutoExit = strval(line);
     fclose(f);
+
+    if (gStartBots > DEMO_MAX) gStartBots = DEMO_MAX;
+    if (gReportSeconds < 1) gReportSeconds = 15;
+    if (gAutoExit < 0) gAutoExit = 0;
     return 1;
 }
 
@@ -383,7 +388,6 @@ stock Demo_EndRecording(bool:captureLast)
         SendClientMessage(owner, 0x33CC66FF, msg);
     }
 
-    gRecordOwner = INVALID_PLAYER_ID;
     return 1;
 }
 
@@ -683,6 +687,8 @@ public OnPlayerDisconnect(playerid, reason)
 {
     if (gRecording && gRecordOwner == playerid)
         Demo_EndRecording(false);
+    if (gRecordOwner == playerid)
+        gRecordOwner = INVALID_PLAYER_ID;
     return 1;
 }
 
@@ -1077,8 +1083,16 @@ public OnPlayerCommandText(playerid, cmdtext[])
         new enabled = strval(token);
         if (enabled != 0 && enabled != 1)
             return SendClientMessage(playerid, 0xFF6666FF, "Usage: /botpool <0|1>"), 1;
-        FakeBotSetPoolingEnabled(enabled == 1);
-        SendClientMessage(playerid, 0x33CC66FF, enabled ? "Bot pooling enabled." : "Bot pooling disabled.");
+        if (enabled == 1)
+        {
+            FakeBotSetPoolingEnabled(true);
+            SendClientMessage(playerid, 0x33CC66FF, "Bot pooling enabled.");
+        }
+        else
+        {
+            FakeBotSetPoolingEnabled(false);
+            SendClientMessage(playerid, 0x33CC66FF, "Bot pooling disabled.");
+        }
         return 1;
     }
 
@@ -1154,9 +1168,14 @@ public OnPlayerCommandText(playerid, cmdtext[])
 
     if (!strcmp(cmd, "/recordstatus", true))
     {
-        new msg[144];
+        new msg[144], recordingText[12], replayText[16];
+        if (gRecording) format(recordingText, sizeof(recordingText), "yes");
+        else format(recordingText, sizeof(recordingText), "no");
+        if (gReplaying) format(replayText, sizeof(replayText), "yes");
+        else if (gReplayWaiting) format(replayText, sizeof(replayText), "connecting");
+        else format(replayText, sizeof(replayText), "no");
         format(msg, sizeof(msg), "Frames=%d/%d | recording=%s | replay=%s | sample=%dms",
-            gRecordCount, DEMO_RECORD_MAX, gRecording ? ("yes") : ("no"), gReplaying ? ("yes") : (gReplayWaiting ? ("connecting") : ("no")), DEMO_RECORD_INTERVAL);
+            gRecordCount, DEMO_RECORD_MAX, recordingText, replayText, DEMO_RECORD_INTERVAL);
         SendClientMessage(playerid, 0xFFFFFFFF, msg);
         return 1;
     }
