@@ -1159,6 +1159,8 @@ public OnPlayerCommandText(playerid, cmdtext[])
             return SendClientMessage(playerid, 0xFF6666FF, "Only real players can start a recording."), 1;
         if (gRecording)
             return SendClientMessage(playerid, 0xFF6666FF, "A recording is already running."), 1;
+        if (gReplaying || gReplayWaiting)
+            Demo_StopReplay(false);
 
         gRecordCount = 0;
         gRecordOwner = playerid;
