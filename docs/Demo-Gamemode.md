@@ -8,6 +8,7 @@ The demo gamemode is an example control panel built on top of the FakeBots API. 
 |---|---|
 | `/help` | Show the command list |
 | `/botcount` | Show connected players and bot counts |
+| `/botlist [page]` | List bot IDs, names and states (10 per page) |
 | `/bots <1-50>` | Create up to 50 bots per command |
 | `/botsclear` | Request removal of every bot |
 | `/botsfollow` | Make every bot follow the caller |
