@@ -784,7 +784,7 @@ public OnPlayerCommandText(playerid, cmdtext[])
     if (!strcmp(cmd, "/help", true))
     {
         SendClientMessage(playerid, 0xFFCC00FF, "=== FakeBots demo commands ===");
-        SendClientMessage(playerid, 0xFFFFFFFF, "/botcount  /bots <1-50>  /botsclear  /botsfollow  /botsstop");
+        SendClientMessage(playerid, 0xFFFFFFFF, "/botcount  /botlist [page]  /bots <1-50>  /botsclear  /botsfollow  /botsstop");
         SendClientMessage(playerid, 0xFFFFFFFF, "/botcar  /botsay <text>  /botwalk <id> <x> <y> <z> [speed]");
         SendClientMessage(playerid, 0xFFFFFFFF, "/botdrive <id> <x> <y> <z> [speed]  /botfollow <id>  /botwander <id> [radius]");
         SendClientMessage(playerid, 0xFFFFFFFF, "/botstop <id>  /botremove <id>  /botrespawn <id>  /botpos <id>");
@@ -800,6 +800,47 @@ public OnPlayerCommandText(playerid, cmdtext[])
         new msg[128];
         format(msg, sizeof(msg), "Players: %d (bots: %d, real players: %d, slots: %d)", Demo_AllPlayers(), FakeBotGetCount(), Demo_RealPlayers(), GetMaxPlayers());
         SendClientMessage(playerid, 0xFFFFFFFF, msg);
+        return 1;
+    }
+
+
+    if (!strcmp(cmd, "/botlist", true))
+    {
+        new pageText[16], page;
+        if (Demo_NextToken(cmdtext, idx, pageText, sizeof(pageText)))
+            page = strval(pageText);
+        if (page < 0)
+            return SendClientMessage(playerid, 0xFF6666FF, "Page number cannot be negative."), 1;
+
+        if (gBotCount == 0)
+            return SendClientMessage(playerid, 0xFFFFFFFF, "No bots are currently tracked."), 1;
+
+        new pages = (gBotCount + 9) / 10;
+        if (page >= pages)
+            return SendClientMessage(playerid, 0xFF6666FF, "That bot-list page does not exist."), 1;
+
+        new msg[128];
+        format(msg, sizeof(msg), "Bot list page %d/%d (total %d)", page + 1, pages, gBotCount);
+        SendClientMessage(playerid, 0xFFCC00FF, msg);
+
+        for (new i = page * 10; i < gBotCount && i < (page + 1) * 10; i++)
+        {
+            if (!FakeBotIsValid(gBots[i]))
+                continue;
+
+            new stateText[16];
+            switch (FakeBotGetState(gBots[i]))
+            {
+                case FAKEBOTS_STATE_CONNECTING: stateText = "connecting";
+                case FAKEBOTS_STATE_IDLE:       stateText = "idle";
+                case FAKEBOTS_STATE_SPAWNED:    stateText = "spawned";
+                case FAKEBOTS_STATE_DEAD:       stateText = "dead";
+                default:                        stateText = "removing";
+            }
+
+            format(msg, sizeof(msg), "#%d %s | %s", gBots[i], gBotNames[i], stateText);
+            SendClientMessage(playerid, 0xFFFFFFFF, msg);
+        }
         return 1;
     }
 
