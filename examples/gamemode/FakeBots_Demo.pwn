@@ -171,7 +171,7 @@ forward Demo_ReplayTick();
 
 stock Demo_ReadConfig()
 {
-    File:f = fopen(DEMO_CFG, io_read);
+    new File:f = fopen(DEMO_CFG, io_read);
     if (!f) return 0;
 
     new line[32];
