@@ -1,13 +1,14 @@
 # =============================================================================
 #  FakeBots - release pipeline
 #
-#  Push a version tag (for example v3.2.1), or push a release-preparation commit to master
-#  whose exact message is "chore(release): vX.Y.Z". Both paths audit and build the 32-bit
-#  Linux/Windows plugins, package them, and publish the GitHub release.
+#  Push a release-preparation commit to master whose exact message is
+#  "chore(release): vX.Y.Z". The pipeline audits, builds both 32-bit plugins, packages
+#  them, creates the matching version tag at that commit, and publishes the GitHub release.
 #
-#  Master pushes run the audit; ordinary commits skip the platform builds and publishing.
-#  A release-preparation commit creates the matching version tag at that commit.
-#  "Run workflow" (workflow_dispatch) remains a build-only path and stores binaries as artifacts.
+#  Ordinary master commits run only the source audit. "Run workflow" (workflow_dispatch)
+#  remains build-only and stores the Linux/Windows binaries as Actions artifacts.
+#
+#  Publishing uses the job-scoped GITHUB_TOKEN with contents: write; no personal token is needed.
 #
 #  Publishing uses the job-scoped GITHUB_TOKEN with contents: write; no personal token secret
 #  is required.
@@ -18,8 +19,6 @@ on:
   push:
     branches:
       - master
-    tags:
-      - "*"
   workflow_dispatch:
 
 # Build/audit jobs are read-only; only the publish job receives contents: write.
@@ -42,17 +41,6 @@ jobs:
       - name: No NPC code paths, no forbidden APIs
         run: python3 tools/source_audit.py
 
-      - name: Tag matches the plugin version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
-          tag_version="${GITHUB_REF_NAME#v}"
-          echo "tag: ${GITHUB_REF_NAME}   plugin reports: ${plugin_version}"
-          if [ "${plugin_version}" != "${tag_version}" ]; then
-            echo "::error title=Tag and plugin version differ::The tag is ${GITHUB_REF_NAME} but src/core/Common.h says ${plugin_version}."
-            exit 1
-          fi
-
       - name: Release commit matches the plugin version
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
         run: |
@@ -69,7 +57,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-linux:
     name: Build (Linux x86)
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: audit
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -105,7 +93,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-windows:
     name: Build (Windows x86)
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: audit
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -149,7 +137,7 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
     needs: [build-linux, build-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -164,21 +152,12 @@ jobs:
         shell: bash
         run: |
           plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF_NAME}"
-            tag_version="${TAG#v}"
-            if [[ "${tag_version}" != "${plugin_version}" ]]; then
-              echo "::error title=Tag and plugin version differ::${TAG} does not match ${plugin_version}."
-              exit 1
-            fi
-          else
-            TAG="v${plugin_version}"
-            release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
-            expected_message="chore(release): ${TAG}"
-            if [[ "${release_message}" != "${expected_message}" ]]; then
-              echo "::error title=Invalid release commit::Expected '${expected_message}'."
-              exit 1
-            fi
+          TAG="v${plugin_version}"
+          release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
+          expected_message="chore(release): ${TAG}"
+          if [[ "${release_message}" != "${expected_message}" ]]; then
+            echo "::error title=Invalid release commit::Expected '${expected_message}'."
+            exit 1
           fi
           echo "TAG=${TAG}" >> "$GITHUB_ENV"
           echo "Publishing FakeBots ${TAG}"
