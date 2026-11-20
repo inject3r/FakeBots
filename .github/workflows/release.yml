@@ -1,29 +1,32 @@
 # =============================================================================
 #  FakeBots - release pipeline
 #
-#  Push a tag (git tag v3.2.0 && git push origin v3.2.0) and this workflow
+#  Push a version tag (for example v3.2.1), or push a release-preparation commit to master
+#  whose exact message is "chore(release): vX.Y.Z". Both paths audit and build the 32-bit
+#  Linux/Windows plugins, package them, and publish the GitHub release.
 #
-#    1. audits the sources (the "bots are never NPCs" guard),
-#    2. builds the plugin for Linux (FakeBots.so) and Windows (FakeBots.dll), both 32-bit,
-#    3. packages everything a server owner needs and creates the GitHub release for the tag with
-#       the repository secret PERSONAL_TOKEN.
+#  A release-preparation commit creates the matching version tag at that commit when the
+#  release is published. Ordinary master commits do not publish. "Run workflow"
+#  (workflow_dispatch) remains a build-only path and stores binaries as Actions artifacts.
 #
-#  Setup (once): Settings -> Secrets and variables -> Actions -> New repository secret
-#                name PERSONAL_TOKEN, value = a personal access token that may create releases
-#                (classic: scope "repo"; fine-grained: "Contents: Read and write" on this repo).
-#
-#  "Run workflow" (workflow_dispatch) runs steps 1-2 on any branch and keeps the builds as
-#  artifacts; it never publishes a release.
+#  Publishing uses the job-scoped GITHUB_TOKEN with contents: write; no personal token secret
+#  is required.
 # =============================================================================
 name: Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "*"
+    paths:
+      - "src/core/Common.h"
+      - "CHANGELOG.md"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
-# The release itself is created with PERSONAL_TOKEN, so the built-in token only reads the code.
+# Build/audit jobs are read-only; only the publish job receives contents: write.
 permissions:
   contents: read
 
@@ -50,7 +53,20 @@ jobs:
           tag_version="${GITHUB_REF_NAME#v}"
           echo "tag: ${GITHUB_REF_NAME}   plugin reports: ${plugin_version}"
           if [ "${plugin_version}" != "${tag_version}" ]; then
-            echo "::warning title=Tag and plugin version differ::The tag is ${GITHUB_REF_NAME} but src/core/Common.h says ${plugin_version}. The binaries will print ${plugin_version} when a server loads them."
+            echo "::error title=Tag and plugin version differ::The tag is ${GITHUB_REF_NAME} but src/core/Common.h says ${plugin_version}."
+            exit 1
+          fi
+
+      - name: Release commit matches the plugin version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+        run: |
+          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
+          release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
+          expected_message="chore(release): v${plugin_version}"
+          echo "release commit: ${release_message}"
+          if [ "${release_message}" != "${expected_message}" ]; then
+            echo "::error title=Release message and version differ::Expected '${expected_message}'."
+            exit 1
           fi
 
   # ---------------------------------------------------------------------------
@@ -134,23 +150,39 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: [build-linux, build-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: write
     env:
-      TAG: ${{ github.ref_name }}
-      GH_REPO: ${{ github.repository }}
-      GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: The PERSONAL_TOKEN secret exists
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error title=PERSONAL_TOKEN is not set::Create the repository secret PERSONAL_TOKEN (Settings -> Secrets and variables -> Actions) holding a token that may create releases, then re-run this workflow."
-            exit 1
-          fi
-
       - uses: actions/checkout@v4
+
+      - name: Determine and validate release tag
+        shell: bash
+        run: |
+          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            tag_version="${TAG#v}"
+            if [[ "${tag_version}" != "${plugin_version}" ]]; then
+              echo "::error title=Tag and plugin version differ::${TAG} does not match ${plugin_version}."
+              exit 1
+            fi
+          else
+            TAG="v${plugin_version}"
+            release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
+            expected_message="chore(release): ${TAG}"
+            if [[ "${release_message}" != "${expected_message}" ]]; then
+              echo "::error title=Invalid release commit::Expected '${expected_message}'."
+              exit 1
+            fi
+          fi
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "Publishing FakeBots ${TAG}"
 
       - uses: actions/download-artifact@v4
         with:
@@ -191,6 +223,6 @@ jobs:
               --title "FakeBots ${TAG}" \
               --notes-file notes.md \
               --prerelease="${prerelease}" \
-              --verify-tag
+              --target "${GITHUB_SHA}"
           fi
           gh release view "${TAG}" --json url,assets --jq '"Released: \(.url)\n" + ([.assets[].name] | join("\n"))'
