@@ -80,6 +80,7 @@ namespace FakeBots
         constexpr int kInvalidPassword = 37;
         constexpr int kStageTimeoutBase = -1000;
         constexpr int kJoinRejectedBase = -2000;
+        constexpr int kLocalStartFailed = -3000;
     }
 
     class SampBotClient
