@@ -1,0 +1,48 @@
+name: Clean failed and cancelled Actions runs
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/cleanup-failed-runs.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    name: Remove failed and cancelled runs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Delete historical failed and cancelled runs
+        env:
+          GH_TOKEN: \${{ github.token }}
+          REPOSITORY: \${{ github.repository }}
+          CURRENT_RUN_ID: \${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Collect the IDs first; deleting while paginating would shift page offsets.
+          mapfile -t RUN_IDS < <(
+            gh api --paginate --jq \
+              '.workflow_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .id' \
+              "repos/\${REPOSITORY}/actions/runs?per_page=100"
+          )
+
+          deleted=0
+          skipped=0
+          for run_id in "\${RUN_IDS[@]}"; do
+            if [[ "\${run_id}" == "\${CURRENT_RUN_ID}" ]]; then
+              skipped=$((skipped + 1))
+              continue
+            fi
+            gh api --method DELETE "repos/\${REPOSITORY}/actions/runs/\${run_id}" >/dev/null
+            echo "Deleted run \${run_id}"
+            deleted=$((deleted + 1))
+          done
+
+          echo "Deleted: \${deleted}; skipped current run: \${skipped}"
