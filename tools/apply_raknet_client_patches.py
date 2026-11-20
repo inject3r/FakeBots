@@ -356,10 +356,10 @@ def patch_rakpeer_resources(t):
     t = sub_once(
         t,
         "#include <pthread.h>\n",
-        "#include <pthread.h>\n#include <errno.h>\n#include <limits.h>\n#include <stdio.h>\n",
+        "#include <pthread.h>\n#include <errno.h>\n#include <limits.h>\n",
         "RakPeer pthread includes",
     )
-    t = sub_once(t, "#include <string.h>\n", "#include <string.h>\n#include <new>\n", "RakPeer bad_alloc include")
+    t = sub_once(t, "#include <string.h>\n", "#include <string.h>\n#include <stdio.h>\n#include <new>\n", "RakPeer portable diagnostics and bad_alloc include")
 
     stack_helper = r"""using namespace RakNet;
 
