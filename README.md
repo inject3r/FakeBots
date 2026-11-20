@@ -55,6 +55,11 @@ public OnFakeBotSpawn(botid)
   still occupies a slot. Off by default.
 * **Debugging.** Start the server with the environment variable `FAKEBOTS_DEBUG=1` to get the
   network trace of the handshakes in the server log.
+* **Linux thread stacks.** Each bot still owns one RakNet network thread. FakeBots requests a
+  2 MiB stack per network thread by default instead of inheriting a potentially much larger
+  process default. Set `FAKEBOTS_RAKNET_STACK_SIZE_KB` before starting the server to choose
+  256–32768 KiB (for example, `2048`). This reduces reserved virtual address space; it does not
+  remove per-bot heap/packet memory or replace a future shared-event-loop redesign.
 
 ## Building
 
