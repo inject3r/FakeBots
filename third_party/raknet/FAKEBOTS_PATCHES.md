@@ -46,6 +46,15 @@ therefore reviewable with `git diff` or by re-running the script.
   disconnect itself exactly 30 seconds after connecting. It is no longer applied to a connection
   we initiated.
 - The number of open-connection attempts is configurable (`SAMPRakNet::SetMaxConnectionAttempts`).
+- On POSIX, RakNet worker stacks are explicitly configured (2 MiB by default, overridable with
+  `FAKEBOTS_RAKNET_STACK_SIZE_KB`), and pthread-attribute / thread-creation errors are checked
+  and reported. A failed worker start tears down the socket and peer allocations.
+- The remote-system table allocation is caught as `std::bad_alloc` and fails initialization cleanly.
+
+**`RakClient.cpp`**
+- `RakClient::Connect()` validates its arguments and stops immediately when `RakPeer::Initialize()`
+  fails; it no longer sends a connection request from a peer whose socket or worker thread
+  could not be created.
 
 **`ReliabilityLayer.cpp`**, **`RakPeer.cpp`**: diagnostic lines (printed only with `FAKEBOTS_DEBUG=1`).
 
