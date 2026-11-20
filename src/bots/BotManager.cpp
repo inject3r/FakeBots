@@ -67,6 +67,7 @@ namespace FakeBots
             switch (code)
             {
                 case NetFail::kAttemptFailed:   return "the server did not answer the connection attempt";
+                case NetFail::kLocalStartFailed: return "the local RakNet client could not be initialized";
                 case NetFail::kNoFreeSlot:      return "the server has no free player slot";
                 case NetFail::kClosedByServer:  return "the server closed the connection";
                 case NetFail::kConnectionLost:  return "the connection was lost (timeout)";
@@ -496,7 +497,7 @@ namespace FakeBots
 
             if (!StartBotConnection(*bot))
             {
-                HandleTransportFailure(next.botId, NetFail::kAttemptFailed);
+                HandleTransportFailure(next.botId, NetFail::kLocalStartFailed);
                 continue;
             }
             ++inFlight;
