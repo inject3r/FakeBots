@@ -81,3 +81,10 @@ FakeBotDestroy(botid);
 
 For the complete native/callback list, see
 [API-Reference.md](API-Reference.md).
+
+## Demo commands and recording
+
+The expanded demo command list and the movement recorder are documented in
+[Demo-Gamemode.md](Demo-Gamemode.md). The recorder stores a sampled on-foot/vehicle path in
+memory and replays it with a FakeBots bot; it is not a full recording of raw player inputs.
+
