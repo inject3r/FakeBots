@@ -42,7 +42,7 @@ jobs:
         run: python3 tools/source_audit.py
 
       - name: Release commit matches the plugin version
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+        if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
         run: |
           plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
           release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
@@ -137,7 +137,7 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Publish release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
     needs: [build-linux, build-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
