@@ -1,0 +1,35 @@
+name: Maintenance - duplicate Actions cleanup
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/cleanup-duplicate-runs.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    if: github.event.head_commit.message == 'ci: one-time duplicate Actions cleanup'
+    name: Remove duplicate release runs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Delete superseded v3.2.1 runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for run_id in \
+            44808278829 \
+            44808269144 \
+            44808019123 \
+            44807771742 \
+            44807759383
+          do
+            gh api --silent --method DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+            echo "Deleted workflow run ${run_id}"
+          done
