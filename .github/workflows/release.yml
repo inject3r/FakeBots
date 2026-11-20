@@ -65,6 +65,7 @@ jobs:
             exit 1
           fi
 
+  # Only build on version tags, explicit manual runs, or marked release commits.
   # ---------------------------------------------------------------------------
   build-linux:
     name: Build (Linux x86)
