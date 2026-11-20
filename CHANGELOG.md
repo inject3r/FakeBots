@@ -22,6 +22,7 @@
 
 ### Release artifacts
 - The versioned release contains Linux x86 and Windows x86 plugin builds, the Pawn include, installation instructions, examples, documentation, and a SHA-256 manifest.
+- Publishing is gated on a passing source audit, Linux x86 build, Windows x86 build, and checksum verification.
 
 ## 3.2.0 - A network layer that actually joins real servers
 
