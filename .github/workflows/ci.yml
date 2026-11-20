@@ -56,7 +56,7 @@ jobs:
           file build/FakeBots.so | grep -q 'ELF 32-bit LSB shared object, Intel 80386'
 
       - name: Upload Linux release binary
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+        if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
         uses: actions/upload-artifact@v4
         with:
           name: linux-x86
@@ -65,7 +65,7 @@ jobs:
 
   windows-x86:
     name: Build (Windows x86)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
     needs: linux-x86
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -108,7 +108,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
     needs: [linux-x86, windows-x86]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
