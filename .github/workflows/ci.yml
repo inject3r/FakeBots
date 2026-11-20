@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-x86:
+    name: Audit and build (Linux x86)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the 32-bit toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake gcc-multilib g++-multilib
+
+      - name: Validate Python tooling
+        run: |
+          python3 -m py_compile tools/source_audit.py tools/apply_raknet_client_patches.py tests/run_server_test.py
+          python3 tools/source_audit.py
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFAKEBOTS_BUILD_PROBE=ON
+
+      - name: Build plugin
+        run: cmake --build build --parallel 2 --target FakeBots
+
+      - name: Verify 32-bit plugin
+        run: |
+          file build/FakeBots.so
+          file build/FakeBots.so | grep -q 'ELF 32-bit LSB shared object, Intel 80386'
