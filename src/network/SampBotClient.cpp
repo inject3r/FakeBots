@@ -21,6 +21,8 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <new>
+#include <cstdio>
 #include <random>
 #include <thread>
 
@@ -118,14 +120,49 @@ namespace FakeBots
                 return w;
             }
 
-            void Submit(RakNet::RakClientInterface* client, unsigned int blockMs)
+            void Submit(RakNet::RakClientInterface* client, unsigned int blockMs) noexcept
             {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                if (!m_thread.joinable())
-                    m_thread = std::thread(&DisconnectWorker::Run, this);
-                m_queue.push_back({client, blockMs});
-                m_pending.fetch_add(1);
-                m_cv.notify_one();
+                if (client == nullptr)
+                    return;
+
+                const Item item{client, blockMs};
+                try
+                {
+                    std::unique_lock<std::mutex> lock(m_mutex);
+                    try
+                    {
+                        m_queue.push_back(item);
+                    }
+                    catch (...)
+                    {
+                        lock.unlock();
+                        Dispose(item);
+                        return;
+                    }
+
+                    m_pending.fetch_add(1);
+                    if (!m_thread.joinable())
+                    {
+                        try
+                        {
+                            m_thread = std::thread(&DisconnectWorker::Run, this);
+                        }
+                        catch (...)
+                        {
+                            m_queue.pop_back();
+                            m_pending.fetch_sub(1);
+                            lock.unlock();
+                            Dispose(item);
+                            m_idleCv.notify_all();
+                            return;
+                        }
+                    }
+                    m_cv.notify_one();
+                }
+                catch (...)
+                {
+                    Dispose(item);
+                }
             }
 
             void Flush()
@@ -162,6 +199,29 @@ namespace FakeBots
                 unsigned int blockMs;
             };
 
+            static void Dispose(const Item& item) noexcept
+            {
+                if (item.client == nullptr)
+                    return;
+
+                try
+                {
+                    item.client->Disconnect(item.blockMs);
+                }
+                catch (...)
+                {
+                }
+
+                try
+                {
+                    std::lock_guard<std::recursive_mutex> lifecycle(RakLifecycleMutex());
+                    RakNet::RakNetworkFactory::DestroyRakClientInterface(item.client);
+                }
+                catch (...)
+                {
+                }
+            }
+
             void Run()
             {
                 for (;;)
@@ -175,11 +235,7 @@ namespace FakeBots
                         item = m_queue.front();
                         m_queue.pop_front();
                     }
-                    item.client->Disconnect(item.blockMs);
-                    {
-                        std::lock_guard<std::recursive_mutex> lifecycle(RakLifecycleMutex());
-                        RakNet::RakNetworkFactory::DestroyRakClientInterface(item.client);
-                    }
+                    Dispose(item);
                     {
                         std::lock_guard<std::mutex> lock(m_mutex);
                         m_pending.fetch_sub(1);
@@ -304,7 +360,9 @@ namespace FakeBots
 
     bool SampBotClient::Start(const Config& config)
     {
-        Stop(0);
+        try
+        {
+            Stop(0);
 
         if (config.host.empty() || config.port == 0 || m_name.empty())
         {
@@ -357,7 +415,15 @@ namespace FakeBots
 
         EnterState(State::Connecting);
         MarkStageDeadline(m_config.connectTimeoutMs + 2000);
-        return true;
+            return true;
+        }
+        catch (const std::bad_alloc&)
+        {
+            Stop(0);
+            m_state = State::Failed;
+            std::fprintf(stderr, "[FakeBots] Could not start bot '%s': memory allocation failed.\\n", m_name.c_str());
+            return false;
+        }
     }
 
     void SampBotClient::Stop(unsigned int blockDurationMs)
