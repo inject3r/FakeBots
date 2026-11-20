@@ -20,6 +20,9 @@
 - The automated source audit and Linux x86 / Windows x86 builds are covered by GitHub Actions. This changelog does not claim a new long-duration live-server stress benchmark for maximum bot counts.
 - Release archives include the Linux x86 plugin, Windows x86 plugin, Pawn include, installation files, documentation, and a SHA-256 checksum manifest.
 
+### Release artifacts
+- The versioned release contains Linux x86 and Windows x86 plugin builds, the Pawn include, installation instructions, examples, documentation, and a SHA-256 manifest.
+
 ## 3.2.0 - A network layer that actually joins real servers
 
 ### The embedded RakNet client
