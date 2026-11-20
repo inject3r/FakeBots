@@ -1,27 +1,16 @@
 # =============================================================================
 #  FakeBots - release pipeline
 #
-#  Push a release-preparation commit to master whose exact message is
-#  "chore(release): vX.Y.Z". The pipeline audits, builds both 32-bit plugins, packages
-#  them, creates the matching version tag at that commit, and publishes the GitHub release.
-#
-#  Ordinary master commits run only the source audit. "Run workflow" (workflow_dispatch)
-#  remains build-only and stores the Linux/Windows binaries as Actions artifacts.
-#
-#  Publishing uses the job-scoped GITHUB_TOKEN with contents: write; no personal token is needed.
-#
-#  Publishing uses the job-scoped GITHUB_TOKEN with contents: write; no personal token secret
-#  is required.
+#  Manual build-only workflow. It audits and builds Linux/Windows x86 binaries as
+#  Actions artifacts. Automatic versioned releases are published by ci.yml on a marked
+#  release-preparation commit to master.
 # =============================================================================
 name: Release
 
 on:
-  push:
-    branches:
-      - master
   workflow_dispatch:
 
-# Build/audit jobs are read-only; only the publish job receives contents: write.
+# Manual build artifacts only; this workflow does not publish a GitHub release.
 permissions:
   contents: read
 
@@ -41,23 +30,9 @@ jobs:
       - name: No NPC code paths, no forbidden APIs
         run: python3 tools/source_audit.py
 
-      - name: Release commit matches the plugin version
-        if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
-        run: |
-          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
-          release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
-          expected_message="chore(release): v${plugin_version}"
-          echo "release commit: ${release_message}"
-          if [ "${release_message}" != "${expected_message}" ]; then
-            echo "::error title=Release message and version differ::Expected '${expected_message}'."
-            exit 1
-          fi
-
-  # Only build on version tags, explicit manual runs, or marked release commits.
   # ---------------------------------------------------------------------------
   build-linux:
     name: Build (Linux x86)
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: audit
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -93,7 +68,6 @@ jobs:
   # ---------------------------------------------------------------------------
   build-windows:
     name: Build (Windows x86)
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: audit
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -133,74 +107,3 @@ jobs:
           name: windows-x86
           path: build/FakeBots.dll
           if-no-files-found: error
-
-  # ---------------------------------------------------------------------------
-  release:
-    name: Publish release
-    if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')"
-    needs: [build-linux, build-windows]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Determine and validate release tag
-        shell: bash
-        run: |
-          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
-          TAG="v${plugin_version}"
-          release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
-          expected_message="chore(release): ${TAG}"
-          if [[ "${release_message}" != "${expected_message}" ]]; then
-            echo "::error title=Invalid release commit::Expected '${expected_message}'."
-            exit 1
-          fi
-          echo "TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "Publishing FakeBots ${TAG}"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux-x86
-          path: artifacts/linux-x86
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-x86
-          path: artifacts/windows-x86
-
-      - name: Package the release files
-        run: |
-          python3 tools/package_release.py --tag "${TAG}" \
-            --linux   artifacts/linux-x86/FakeBots.so \
-            --windows artifacts/windows-x86/FakeBots.dll \
-            --out dist
-          python3 tools/release_notes.py --tag "${TAG}" > notes.md
-          echo "--- release files:"
-          ls -la dist
-          echo "--- checksums:"
-          cat dist/SHA256SUMS.txt
-          (cd dist && sha256sum -c SHA256SUMS.txt)
-
-      - name: Create (or update) the GitHub release
-        run: |
-          set -euo pipefail
-          # "v1.2.3-rc1", "1.0.0-beta" ... are pre-releases
-          prerelease=false
-          case "${TAG}" in *-*) prerelease=true ;; esac
-
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Release ${TAG} already exists - replacing its files and text."
-            gh release upload "${TAG}" dist/* --clobber
-            gh release edit "${TAG}" --title "FakeBots ${TAG}" --notes-file notes.md --prerelease="${prerelease}"
-          else
-            gh release create "${TAG}" dist/* \
-              --title "FakeBots ${TAG}" \
-              --notes-file notes.md \
-              --prerelease="${prerelease}" \
-              --target "${GITHUB_SHA}"
-          fi
-          gh release view "${TAG}" --json url,assets --jq '"Released: \(.url)\n" + ([.assets[].name] | join("\n"))'
