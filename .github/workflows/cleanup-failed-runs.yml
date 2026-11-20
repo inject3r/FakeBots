@@ -19,9 +19,9 @@ jobs:
     steps:
       - name: Delete historical failed and cancelled runs
         env:
-          GH_TOKEN: \${{ github.token }}
-          REPOSITORY: \${{ github.repository }}
-          CURRENT_RUN_ID: \${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
@@ -30,19 +30,19 @@ jobs:
           mapfile -t RUN_IDS < <(
             gh api --paginate --jq \
               '.workflow_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .id' \
-              "repos/\${REPOSITORY}/actions/runs?per_page=100"
+              "repos/${REPOSITORY}/actions/runs?per_page=100"
           )
 
           deleted=0
           skipped=0
-          for run_id in "\${RUN_IDS[@]}"; do
-            if [[ "\${run_id}" == "\${CURRENT_RUN_ID}" ]]; then
+          for run_id in "${RUN_IDS[@]}"; do
+            if [[ "${run_id}" == "${CURRENT_RUN_ID}" ]]; then
               skipped=$((skipped + 1))
               continue
             fi
-            gh api --method DELETE "repos/\${REPOSITORY}/actions/runs/\${run_id}" >/dev/null
-            echo "Deleted run \${run_id}"
+            gh api --method DELETE "repos/${REPOSITORY}/actions/runs/${run_id}" >/dev/null
+            echo "Deleted run ${run_id}"
             deleted=$((deleted + 1))
           done
 
-          echo "Deleted: \${deleted}; skipped current run: \${skipped}"
+          echo "Deleted: ${deleted}; skipped current run: ${skipped}"
