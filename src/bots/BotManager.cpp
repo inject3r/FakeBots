@@ -150,7 +150,6 @@ namespace FakeBots
         m_activeBotIds.clear();
         m_pool.clear();
         m_expectedBotDisconnects.clear();
-        m_transportFailures.clear();
         m_startQueue.clear();
         m_transportFailureCount = 0;
         m_cachedConnected = 0;
