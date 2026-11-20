@@ -65,8 +65,25 @@ for root in (SOURCE, ROOT / "third_party" / "raknet" / "Source", ROOT / "third_p
             errors.append(f"NPC reference in executable code: {path}")
 
 common = (SOURCE / "core" / "Common.h").read_text(encoding="utf-8")
-if 'FAKEBOTS_VERSION_STRING    "3.2.0"' not in common:
-    errors.append("version metadata is not 3.2.0")
+version_match = re.search(
+    r'^\\s*#define\\s+FAKEBOTS_VERSION_STRING\\s+"(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+][0-9A-Za-z.-]+)?"',
+    common,
+    re.M,
+)
+if not version_match:
+    errors.append("version metadata is missing or is not semantic MAJOR.MINOR.PATCH")
+else:
+    version = version_match.group(1, 2, 3)
+    macro_names = ("FAKEBOTS_VERSION_MAJOR", "FAKEBOTS_VERSION_MINOR", "FAKEBOTS_VERSION_PATCH")
+    for name, expected in zip(macro_names, version):
+        macro_match = re.search(r"^\\s*#define\\s+" + name + r"\\s+(\\d+)\\s*$", common, re.M)
+        if not macro_match or macro_match.group(1) != expected:
+            errors.append(f"version macro {name} does not match FAKEBOTS_VERSION_STRING")
+
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    version_text = ".".join(version)
+    if not re.search(r"^##\\s+" + re.escape(version_text) + r"(?:\\s|$)", changelog, re.M):
+        errors.append(f"CHANGELOG.md has no release section for {version_text}")
 
 include = (INCLUDE / "FakeBots.inc").read_text(encoding="utf-8")
 if "FAKEBOTS_RESPAWN_KEEP" not in include:
