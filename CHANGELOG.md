@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.2.1 - Linux RakNet worker resource hardening (2026-11-20)
+
+### Linux worker lifecycle and resource handling
+- Linux RakNet workers now request a 2 MiB pthread stack by default. Set `FAKEBOTS_RAKNET_STACK_SIZE_KB` before starting the server to choose a stack size from 256 to 32768 KiB.
+- pthread attribute initialization, detached-state configuration, stack-size configuration and thread creation are checked. Failures are logged and partially initialized resources are cleaned up.
+- RakNet client startup validates its inputs and reports a local startup failure when peer initialization cannot complete, rather than treating it as a remote server handshake failure.
+- Memory-allocation failures during RakNet peer-list initialization, bot startup and disconnect-worker startup are handled at their respective boundaries instead of escaping through worker/plugin startup paths.
+
+### Bot creation and retry behavior
+- Bot creation reserves and queues its startup work before publishing the bot, so an allocation failure does not leave a partially registered bot.
+- Remote connection/handshake failures use bounded exponential retry delays with a small deterministic stagger. A bot waiting for its retry time no longer blocks other ready bots from starting.
+- Local RakNet startup failures are distinguished from remote handshake failures and are not retried as though the server had rejected the connection.
+- Transport failure notifications use a fixed-capacity queue, avoiding a new allocation while recording a transport failure.
+
+### Compatibility and operational notes
+- This is a resource-safety and lifecycle-hardening update; it does not change the Pawn native API.
+- FakeBots still uses one RakNet network thread per bot. The configurable stack size reduces per-thread virtual-address reservations; it does not eliminate per-bot heap/packet memory or replace a shared-event-loop architecture.
+- The automated source audit and Linux x86 / Windows x86 builds are covered by GitHub Actions. This changelog does not claim a new long-duration live-server stress benchmark for maximum bot counts.
+
 ## 3.2.0 - A network layer that actually joins real servers
 
 ### The embedded RakNet client
