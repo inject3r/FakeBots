@@ -31,10 +31,10 @@
 #include <pthread.h>
 #include <errno.h>
 #include <limits.h>
-#include <stdio.h>
 #endif
 #include <ctype.h> // toupper
 #include <string.h>
+#include <stdio.h>
 #include <new>
 #include "GetTime.h"
 #include "PacketEnumerations.h"
