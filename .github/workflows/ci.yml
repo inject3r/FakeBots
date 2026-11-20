@@ -170,3 +170,37 @@ jobs:
               --target "${GITHUB_SHA}"
           fi
           gh release view "${TAG}" --json url,assets --jq '"Released: \(.url)\n" + ([.assets[].name] | join("\n"))'
+
+  cleanup-history:
+    name: Remove failed and cancelled Actions runs
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.head_commit.message == 'chore: final actions cleanup'"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete failed and cancelled runs across the repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t RUN_IDS < <(
+            gh api --paginate --jq \
+              '.workflow_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .id' \
+              "repos/${REPOSITORY}/actions/runs?per_page=100"
+          )
+
+          deleted=0
+          for run_id in "${RUN_IDS[@]}"; do
+            [[ "${run_id}" == "${CURRENT_RUN_ID}" ]] && continue
+            gh api --method DELETE "repos/${REPOSITORY}/actions/runs/${run_id}" >/dev/null
+            echo "Deleted run ${run_id}"
+            deleted=$((deleted + 1))
+          done
+
+          echo "Deleted ${deleted} failed/cancelled workflow runs."
