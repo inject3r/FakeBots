@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cctype>
 #include <unordered_map>
+#include <new>
 
 namespace FakeBots
 {
@@ -384,16 +385,28 @@ namespace FakeBots
         if (botId == kInvalidId)
             return kInvalidId;
 
-        auto bot = std::make_unique<Bot>(botId, name);
-        bot->GetPendingSpawn() = spawn;
-        InstallClientCallbacks(*bot);
+        std::unique_ptr<Bot> bot;
+        try
+        {
+            bot = std::make_unique<Bot>(botId, name);
+            bot->GetPendingSpawn() = spawn;
+            InstallClientCallbacks(*bot);
 
-        // The connection itself is opened by ProcessStartQueue() a few at a time.
-        const uint64_t generation = bot->GetGeneration();
+            // Reserve before publishing the bot. Once the start request is queued,
+            // the remaining commit operations cannot allocate.
+            m_activeBotIds.reserve(m_activeBotIds.size() + 1);
+            const uint64_t generation = bot->GetGeneration();
+            m_startQueue.push_back({botId, generation});
+        }
+        catch (const std::bad_alloc&)
+        {
+            sampgdk::logprintf("[FakeBots] Cannot create '%s': memory allocation failed; no bot was started.", name.c_str());
+            return kInvalidId;
+        }
+
         m_bots[botId] = std::move(bot);
         AddActive(botId);
         ++m_activeCount;
-        m_startQueue.push_back({botId, generation});
         return botId;
     }
 
@@ -465,11 +478,18 @@ namespace FakeBots
                 ++inFlight;
         }
 
-        while (!m_startQueue.empty() && inFlight < kMaxHandshakesInFlight)
+        const uint32_t now = NowMs();
+        for (auto it = m_startQueue.begin();
+             it != m_startQueue.end() && inFlight < kMaxHandshakesInFlight;)
         {
-            const PendingStart next = m_startQueue.front();
-            m_startQueue.pop_front();
+            const PendingStart next = *it;
+            if (next.notBeforeMs != 0 && static_cast<int32_t>(now - next.notBeforeMs) < 0)
+            {
+                ++it;
+                continue;
+            }
 
+            it = m_startQueue.erase(it);
             Bot *bot = GetByBotId(next.botId);
             if (bot == nullptr || bot->GetGeneration() != next.generation)
                 continue; // destroyed before it got its turn
@@ -817,8 +837,29 @@ namespace FakeBots
                 {
                     bot->BumpConnectRetries();
                     bot->Client().Stop(0);
-                    m_startQueue.push_back({botId, bot->GetGeneration()});
-                    continue;
+
+                    const uint32_t retryNumber = static_cast<uint32_t>(bot->GetConnectRetries());
+                    const uint32_t baseDelayMs = std::min<uint32_t>(250U << (retryNumber - 1U), 5000U);
+                    const uint32_t staggerMs = static_cast<uint32_t>((botId * 37 + retryNumber * 17U) % 101U);
+                    const uint32_t delayMs = baseDelayMs + staggerMs;
+                    bool retryQueued = false;
+                    try
+                    {
+                        m_startQueue.push_back({botId, bot->GetGeneration(), NowMs() + delayMs});
+                        retryQueued = true;
+                    }
+                    catch (const std::bad_alloc&)
+                    {
+                        sampgdk::logprintf("[FakeBots] Bot %d ('%s'): could not queue retry because memory allocation failed.",
+                            botId, bot->GetName().c_str());
+                    }
+
+                    if (retryQueued)
+                    {
+                        sampgdk::logprintf("[FakeBots] Bot %d ('%s'): connection retry %u/%d scheduled in %u ms.",
+                            botId, bot->GetName().c_str(), retryNumber, kMaxConnectRetries, delayMs);
+                        continue;
+                    }
                 }
 
                 sampgdk::logprintf("[FakeBots] Bot %d ('%s', player %d): connection ended - %s (code %d).",
