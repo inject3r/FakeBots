@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-x86:
+    name: Audit and build (Linux x86)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the 32-bit toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake gcc-multilib g++-multilib
+
+      - name: Check out the exact RakNet upstream snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: openmultiplayer/RakNet
+          ref: 64d8ddb14d3341436217a9a8815b9511016bb2fa
+          path: upstream-raknet
+
+      - name: Validate Python tooling and reproducible RakNet patches
+        run: |
+          python3 -m py_compile tools/source_audit.py tools/apply_raknet_client_patches.py tests/run_server_test.py
+          python3 tools/source_audit.py
+          python3 tools/apply_raknet_client_patches.py upstream-raknet "$RUNNER_TEMP/raknet-regenerated"
+          cmp third_party/raknet/Source/RakPeer.cpp "$RUNNER_TEMP/raknet-regenerated/Source/RakPeer.cpp"
+          cmp third_party/raknet/Source/RakClient.cpp "$RUNNER_TEMP/raknet-regenerated/Source/RakClient.cpp"
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFAKEBOTS_BUILD_PROBE=ON
+
+      - name: Build plugin
+        run: cmake --build build --parallel 2 --target FakeBots
+
+      - name: Verify 32-bit plugin
+        run: |
+          file build/FakeBots.so
+          file build/FakeBots.so | grep -q 'ELF 32-bit LSB shared object, Intel 80386'

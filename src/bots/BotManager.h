@@ -6,6 +6,7 @@
 
 #include "Bot.h"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 
@@ -68,9 +69,10 @@ namespace FakeBots
         std::unordered_map<int64_t, std::vector<int>> m_realPlayerGrid;
         std::unordered_set<int> m_expectedBotDisconnects;
         struct TransportFailure { int botId; uint64_t generation; int reason; };
-        std::vector<TransportFailure> m_transportFailures;
+        std::array<TransportFailure, kMaxBots> m_transportFailures{};
+        std::size_t m_transportFailureCount = 0;
 
-        struct PendingStart { int botId; uint64_t generation; };
+        struct PendingStart { int botId; uint64_t generation; uint32_t notBeforeMs = 0; };
         std::deque<PendingStart> m_startQueue;
         int m_reservedSlots = 1;
         int m_cachedConnected = 0;

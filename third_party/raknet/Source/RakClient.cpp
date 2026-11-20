@@ -47,8 +47,12 @@ RakClient::~RakClient()
 bool RakClient::Connect( const char* host, unsigned short serverPort, unsigned short clientPort, unsigned int depreciated, int threadSleepTimer )
 {
 	RakPeer::Disconnect( 100 );
-	
-	RakPeer::Initialize( 1, clientPort, threadSleepTimer );
+
+	if ( host == 0 || host[ 0 ] == 0 || serverPort == 0 )
+		return false;
+
+	if ( !RakPeer::Initialize( 1, clientPort, threadSleepTimer ) )
+		return false;
 	
 	if ( host[ 0 ] < '0' || host[ 0 ] > '2' )
 	{

@@ -349,7 +349,170 @@ def patch_rakpeer_cpp(t):
         "\t\t}\n"
     )
     t = sub_once(t, marker, new_branches + marker, "offline cookie/full/banned branches")
+    return patch_rakpeer_resources(t)
+
+
+def patch_rakpeer_resources(t):
+    t = sub_once(
+        t,
+        "#include <pthread.h>\n",
+        "#include <pthread.h>\n#include <errno.h>\n#include <limits.h>\n",
+        "RakPeer pthread includes",
+    )
+    t = sub_once(t, "#include <string.h>\n", "#include <string.h>\n#include <stdio.h>\n#include <new>\n", "RakPeer portable diagnostics and bad_alloc include")
+
+    stack_helper = r"""using namespace RakNet;
+
+#ifndef _WIN32
+namespace
+{
+    size_t GetFakeBotsNetworkThreadStackSize()
+    {
+        static const size_t configuredStackSize = []() -> size_t
+        {
+            const size_t defaultStackSize = 2U * 1024U * 1024U;
+            const char* value = getenv("FAKEBOTS_RAKNET_STACK_SIZE_KB");
+            if (value == 0 || value[0] == '\0')
+                return defaultStackSize;
+
+            char* end = 0;
+            errno = 0;
+            const unsigned long stackSizeKb = strtoul(value, &end, 10);
+            if (errno != 0 || end == value || *end != '\0' ||
+                stackSizeKb < 256UL || stackSizeKb > 32768UL)
+            {
+                fprintf(stderr, "[FakeBots] Invalid FAKEBOTS_RAKNET_STACK_SIZE_KB='%s'; using 2048 KiB.\n", value);
+                return defaultStackSize;
+            }
+
+            const size_t requestedStackSize = static_cast<size_t>(stackSizeKb) * 1024U;
+            if (requestedStackSize < static_cast<size_t>(PTHREAD_STACK_MIN))
+            {
+                fprintf(stderr, "[FakeBots] Requested RakNet thread stack is below PTHREAD_STACK_MIN; using 2048 KiB.\n");
+                return defaultStackSize;
+            }
+            return requestedStackSize;
+        }();
+        return configuredStackSize;
+    }
+
+    void LogPthreadFailure(const char* operation, int errorCode)
+    {
+        fprintf(stderr, "[FakeBots] RakNet %s failed: %s (error %d).\n",
+            operation, strerror(errorCode), errorCode);
+    }
+}
+#endif
+"""
+    t = sub_once(t, "using namespace RakNet;\n", stack_helper, "RakPeer stack helper")
+
+    allocation_old = "\t\tremoteSystemList = new RemoteSystemStruct[ maximumNumberOfPeers ];\n"
+    allocation_new = (
+        "\t\ttry\n"
+        "\t\t{\n"
+        "\t\t\tremoteSystemList = new RemoteSystemStruct[ maximumNumberOfPeers ];\n"
+        "\t\t}\n"
+        "\t\tcatch (const std::bad_alloc&)\n"
+        "\t\t{\n"
+        "\t\t\tmaximumNumberOfPeers = 0;\n"
+        "\t\t\tendThreads = true;\n"
+        "\t\t\tif (connectionSocket != INVALID_SOCKET)\n"
+        "\t\t\t{\n"
+        "\t\t\t\tclosesocket(connectionSocket);\n"
+        "\t\t\t\tconnectionSocket = INVALID_SOCKET;\n"
+        "\t\t\t}\n"
+        "\t\t\tfprintf(stderr, \"[FakeBots] RakNet could not allocate the remote-system table.\\n\");\n"
+        "\t\t\treturn false;\n"
+        "\t\t}\n"
+    )
+    t = sub_once(t, allocation_old, allocation_new, "RakPeer remoteSystemList allocation")
+
+    attrs_old = (
+        "\t\t\tpthread_attr_t attr;\n"
+        "\t\t\tpthread_attr_init( &attr );\n"
+        "\t\t\tpthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );\n\n"
+        "\t\t\t//  sched_param sp;\n"
+        "\t\t\t//  sp.sched_priority = sched_get_priority_max(SCHED_OTHER);\n"
+        "\t\t\t//  pthread_attr_setschedparam(&attr, &sp);\n\n"
+        "\t\t\tint error;\n\n"
+        "\t\t\tif ( isMainLoopThreadActive == false )\n"
+        "\t\t\t{\n"
+        "\t\t\t\terror = pthread_create( &processPacketsThreadHandle, &attr, &UpdateNetworkLoop, this );\n\n"
+        "\t\t\t\tif ( error )\n"
+        "\t\t\t\t{\n"
+        "\t\t\t\t\tDisconnect( 0 );\n"
+        "\t\t\t\t\treturn false;\n"
+        "\t\t\t\t}\n"
+        "\t\t\t}\n\n"
+        "\t\t\tprocessPacketsThreadHandle = 0;"
+    )
+    attrs_new = (
+        "\t\t\tpthread_attr_t attr;\n"
+        "\t\t\tint error = pthread_attr_init(&attr);\n"
+        "\t\t\tif (error != 0)\n"
+        "\t\t\t{\n"
+        "\t\t\t\tLogPthreadFailure(\"pthread_attr_init\", error);\n"
+        "\t\t\t\tDisconnect(0, 0);\n"
+        "\t\t\t\treturn false;\n"
+        "\t\t\t}\n\n"
+        "\t\t\terror = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);\n"
+        "\t\t\tif (error != 0)\n"
+        "\t\t\t{\n"
+        "\t\t\t\tLogPthreadFailure(\"pthread_attr_setdetachstate\", error);\n"
+        "\t\t\t\tpthread_attr_destroy(&attr);\n"
+        "\t\t\t\tDisconnect(0, 0);\n"
+        "\t\t\t\treturn false;\n"
+        "\t\t\t}\n\n"
+        "\t\t\tsize_t platformDefaultStackSize = 0;\n"
+        "\t\t\tconst int queryStackError = pthread_attr_getstacksize(&attr, &platformDefaultStackSize);\n"
+        "\t\t\tif (queryStackError != 0)\n"
+        "\t\t\t\tLogPthreadFailure(\"pthread_attr_getstacksize\", queryStackError);\n\n"
+        "\t\t\tconst size_t configuredStackSize = GetFakeBotsNetworkThreadStackSize();\n"
+        "\t\t\terror = pthread_attr_setstacksize(&attr, configuredStackSize);\n"
+        "\t\t\tif (error != 0)\n"
+        "\t\t\t{\n"
+        "\t\t\t\tLogPthreadFailure(\"pthread_attr_setstacksize\", error);\n"
+        "\t\t\t\tpthread_attr_destroy(&attr);\n"
+        "\t\t\t\tDisconnect(0, 0);\n"
+        "\t\t\t\treturn false;\n"
+        "\t\t\t}\n\n"
+        "\t\t\tstatic bool stackConfigurationLogged = false;\n"
+        "\t\t\tif (!stackConfigurationLogged)\n"
+        "\t\t\t{\n"
+        "\t\t\t\tfprintf(stderr, \"[FakeBots] RakNet network-thread stack: %lu KiB (pthread default: %lu KiB).\\n\",\n"
+        "\t\t\t\t\tstatic_cast<unsigned long>(configuredStackSize / 1024U),\n"
+        "\t\t\t\t\tstatic_cast<unsigned long>(platformDefaultStackSize / 1024U));\n"
+        "\t\t\t\tstackConfigurationLogged = true;\n"
+        "\t\t\t}\n\n"
+        "\t\t\tif (isMainLoopThreadActive == false)\n"
+        "\t\t\t{\n"
+        "\t\t\t\terror = pthread_create(&processPacketsThreadHandle, &attr, &UpdateNetworkLoop, this);\n"
+        "\t\t\t\tif (error != 0)\n"
+        "\t\t\t\t{\n"
+        "\t\t\t\t\tLogPthreadFailure(\"pthread_create\", error);\n"
+        "\t\t\t\t\tpthread_attr_destroy(&attr);\n"
+        "\t\t\t\t\tDisconnect(0, 0);\n"
+        "\t\t\t\t\treturn false;\n"
+        "\t\t\t\t}\n"
+        "\t\t\t}\n\n"
+        "\t\t\tconst int destroyAttrError = pthread_attr_destroy(&attr);\n"
+        "\t\t\tif (destroyAttrError != 0)\n"
+        "\t\t\t\tLogPthreadFailure(\"pthread_attr_destroy\", destroyAttrError);\n\n"
+        "\t\t\tprocessPacketsThreadHandle = 0;"
+    )
+    t = sub_once(t, attrs_old, attrs_new, "RakPeer checked pthread lifecycle")
     return t
+
+
+def patch_rakclient_cpp(t):
+    return sub_once(
+        t,
+        "\tRakPeer::Disconnect( 100 );\n\t\n\tRakPeer::Initialize( 1, clientPort, threadSleepTimer );",
+        "\tRakPeer::Disconnect( 100 );\n\n"
+        "\tif ( host == 0 || host[ 0 ] == 0 || serverPort == 0 )\n\t\treturn false;\n\n"
+        "\tif ( !RakPeer::Initialize( 1, clientPort, threadSleepTimer ) )\n\t\treturn false;",
+        "RakClient checked Initialize result",
+    )
 
 
 def patch_reliabilitylayer(t):
@@ -388,6 +551,8 @@ def main():
     p.write_text(patch_reliabilitylayer(p.read_text(encoding="utf-8", errors="surrogateescape")), encoding="utf-8", errors="surrogateescape")
     p = dst / "Source/RakPeer.cpp"
     p.write_text(patch_rakpeer_cpp(p.read_text(encoding="utf-8", errors="surrogateescape")), encoding="utf-8", errors="surrogateescape")
+    p = dst / "Source/RakClient.cpp"
+    p.write_text(patch_rakclient_cpp(p.read_text(encoding="utf-8", errors="surrogateescape")), encoding="utf-8", errors="surrogateescape")
 
     for f in ("Include/raknet/RakServerInterface.h", "Include/raknet/RakServer.h", "Include/raknet/RakPeerInterface.h"):
         q = dst / f

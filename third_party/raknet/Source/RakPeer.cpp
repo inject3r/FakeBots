@@ -29,9 +29,13 @@
 #define closesocket close
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
+#include <limits.h>
 #endif
 #include <ctype.h> // toupper
 #include <string.h>
+#include <stdio.h>
+#include <new>
 #include "GetTime.h"
 #include "PacketEnumerations.h"
 #include "DS_HuffmanEncodingTree.h"
@@ -62,6 +66,47 @@
 #endif
 
 using namespace RakNet;
+
+#ifndef _WIN32
+namespace
+{
+    size_t GetFakeBotsNetworkThreadStackSize()
+    {
+        static const size_t configuredStackSize = []() -> size_t
+        {
+            const size_t defaultStackSize = 2U * 1024U * 1024U;
+            const char* value = getenv("FAKEBOTS_RAKNET_STACK_SIZE_KB");
+            if (value == 0 || value[0] == '\0')
+                return defaultStackSize;
+
+            char* end = 0;
+            errno = 0;
+            const unsigned long stackSizeKb = strtoul(value, &end, 10);
+            if (errno != 0 || end == value || *end != '\0' ||
+                stackSizeKb < 256UL || stackSizeKb > 32768UL)
+            {
+                fprintf(stderr, "[FakeBots] Invalid FAKEBOTS_RAKNET_STACK_SIZE_KB='%s'; using 2048 KiB.\n", value);
+                return defaultStackSize;
+            }
+
+            const size_t requestedStackSize = static_cast<size_t>(stackSizeKb) * 1024U;
+            if (requestedStackSize < static_cast<size_t>(PTHREAD_STACK_MIN))
+            {
+                fprintf(stderr, "[FakeBots] Requested RakNet thread stack is below PTHREAD_STACK_MIN; using 2048 KiB.\n");
+                return defaultStackSize;
+            }
+            return requestedStackSize;
+        }();
+        return configuredStackSize;
+    }
+
+    void LogPthreadFailure(const char* operation, int errorCode)
+    {
+        fprintf(stderr, "[FakeBots] RakNet %s failed: %s (error %d).\n",
+            operation, strerror(errorCode), errorCode);
+    }
+}
+#endif
 
 #ifdef _MSC_VER
 #pragma warning( push )
@@ -280,7 +325,22 @@ bool RakPeer::Initialize( unsigned short maxConnections, unsigned short localPor
 
 		// remoteSystemList in Single thread
 		//remoteSystemList = new RemoteSystemStruct[ remoteSystemListSize ];
-		remoteSystemList = new RemoteSystemStruct[ maximumNumberOfPeers ];
+		try
+		{
+			remoteSystemList = new RemoteSystemStruct[ maximumNumberOfPeers ];
+		}
+		catch (const std::bad_alloc&)
+		{
+			maximumNumberOfPeers = 0;
+			endThreads = true;
+			if (connectionSocket != INVALID_SOCKET)
+			{
+				closesocket(connectionSocket);
+				connectionSocket = INVALID_SOCKET;
+			}
+			fprintf(stderr, "[FakeBots] RakNet could not allocate the remote-system table.\n");
+			return false;
+		}
 
 
 		for ( i = 0; i < maximumNumberOfPeers; i++ )
@@ -361,25 +421,62 @@ bool RakPeer::Initialize( unsigned short maxConnections, unsigned short localPor
 
 #else
 			pthread_attr_t attr;
-			pthread_attr_init( &attr );
-			pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
-
-			//  sched_param sp;
-			//  sp.sched_priority = sched_get_priority_max(SCHED_OTHER);
-			//  pthread_attr_setschedparam(&attr, &sp);
-
-			int error;
-
-			if ( isMainLoopThreadActive == false )
+			int error = pthread_attr_init(&attr);
+			if (error != 0)
 			{
-				error = pthread_create( &processPacketsThreadHandle, &attr, &UpdateNetworkLoop, this );
+				LogPthreadFailure("pthread_attr_init", error);
+				Disconnect(0, 0);
+				return false;
+			}
 
-				if ( error )
+			error = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+			if (error != 0)
+			{
+				LogPthreadFailure("pthread_attr_setdetachstate", error);
+				pthread_attr_destroy(&attr);
+				Disconnect(0, 0);
+				return false;
+			}
+
+			size_t platformDefaultStackSize = 0;
+			const int queryStackError = pthread_attr_getstacksize(&attr, &platformDefaultStackSize);
+			if (queryStackError != 0)
+				LogPthreadFailure("pthread_attr_getstacksize", queryStackError);
+
+			const size_t configuredStackSize = GetFakeBotsNetworkThreadStackSize();
+			error = pthread_attr_setstacksize(&attr, configuredStackSize);
+			if (error != 0)
+			{
+				LogPthreadFailure("pthread_attr_setstacksize", error);
+				pthread_attr_destroy(&attr);
+				Disconnect(0, 0);
+				return false;
+			}
+
+			static bool stackConfigurationLogged = false;
+			if (!stackConfigurationLogged)
+			{
+				fprintf(stderr, "[FakeBots] RakNet network-thread stack: %lu KiB (pthread default: %lu KiB).\n",
+					static_cast<unsigned long>(configuredStackSize / 1024U),
+					static_cast<unsigned long>(platformDefaultStackSize / 1024U));
+				stackConfigurationLogged = true;
+			}
+
+			if (isMainLoopThreadActive == false)
+			{
+				error = pthread_create(&processPacketsThreadHandle, &attr, &UpdateNetworkLoop, this);
+				if (error != 0)
 				{
-					Disconnect( 0 );
+					LogPthreadFailure("pthread_create", error);
+					pthread_attr_destroy(&attr);
+					Disconnect(0, 0);
 					return false;
 				}
 			}
+
+			const int destroyAttrError = pthread_attr_destroy(&attr);
+			if (destroyAttrError != 0)
+				LogPthreadFailure("pthread_attr_destroy", destroyAttrError);
 
 			processPacketsThreadHandle = 0;
 #endif
