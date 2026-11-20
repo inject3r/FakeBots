@@ -38,7 +38,7 @@ jobs:
 
       - name: Validate Python tooling and reproducible RakNet patches
         run: |
-          python3 -m py_compile tools/source_audit.py tools/apply_raknet_client_patches.py tests/run_server_test.py
+          python3 -m py_compile tools/source_audit.py tools/apply_raknet_client_patches.py tools/package_release.py tools/release_notes.py tests/run_server_test.py
           python3 tools/source_audit.py
           python3 tools/apply_raknet_client_patches.py upstream-raknet "$RUNNER_TEMP/raknet-regenerated"
           cmp third_party/raknet/Source/RakPeer.cpp "$RUNNER_TEMP/raknet-regenerated/Source/RakPeer.cpp"
@@ -54,3 +54,119 @@ jobs:
         run: |
           file build/FakeBots.so
           file build/FakeBots.so | grep -q 'ELF 32-bit LSB shared object, Intel 80386'
+
+      - name: Upload Linux release binary
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86
+          path: build/FakeBots.so
+          if-no-files-found: error
+
+  windows-x86:
+    name: Build (Windows x86)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+    needs: linux-x86
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the MinGW-w64 (i686) cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++-mingw-w64-i686
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Verify 32-bit self-contained DLL
+        run: |
+          file build/FakeBots.dll
+          file build/FakeBots.dll | grep -q 'PE32 executable (DLL)'
+          imports="$(i686-w64-mingw32-objdump -p build/FakeBots.dll | sed -n 's/^.*DLL Name: //p' | sort -u)"
+          echo "--- DLLs the plugin imports:"
+          echo "${imports}"
+          unexpected="$(echo "${imports}" | grep -viE '^(kernel32|ws2_32|msvcrt|user32|advapi32)\.dll$' || true)"
+          if [ -n "${unexpected}" ]; then
+            echo "::error title=Unexpected DLL dependency::${unexpected}"
+            exit 1
+          fi
+          echo "--- exported plugin entry points:"
+          i686-w64-mingw32-objdump -p build/FakeBots.dll | grep -E '\b(Supports|Load|Unload|AmxLoad|AmxUnload|ProcessTick)\b'
+
+      - name: Upload Windows release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86
+          path: build/FakeBots.dll
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v')
+    needs: [linux-x86, windows-x86]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate release version and commit message
+        shell: bash
+        run: |
+          plugin_version="$(grep -oP 'FAKEBOTS_VERSION_STRING\s+"\K[^"]+' src/core/Common.h)"
+          TAG="v${plugin_version}"
+          release_message="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH")"
+          expected_message="chore(release): ${TAG}"
+          echo "Preparing ${TAG} from ${GITHUB_SHA}"
+          if [[ "${release_message}" != "${expected_message}" ]]; then
+            echo "::error title=Invalid release commit::Expected '${expected_message}'."
+            exit 1
+          fi
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x86
+          path: artifacts/linux-x86
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x86
+          path: artifacts/windows-x86
+
+      - name: Package release files and verify checksums
+        run: |
+          python3 tools/package_release.py --tag "${TAG}" \
+            --linux artifacts/linux-x86/FakeBots.so \
+            --windows artifacts/windows-x86/FakeBots.dll \
+            --out dist
+          python3 tools/release_notes.py --tag "${TAG}" > notes.md
+          cat dist/SHA256SUMS.txt
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+
+      - name: Create or update the GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --clobber
+            gh release edit "${TAG}" --title "FakeBots ${TAG}" --notes-file notes.md --prerelease=false
+          else
+            gh release create "${TAG}" dist/* \
+              --title "FakeBots ${TAG}" \
+              --notes-file notes.md \
+              --target "${GITHUB_SHA}"
+          fi
+          gh release view "${TAG}" --json url,assets --jq '"Released: \(.url)\n" + ([.assets[].name] | join("\n"))'
