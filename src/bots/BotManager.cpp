@@ -152,6 +152,7 @@ namespace FakeBots
         m_expectedBotDisconnects.clear();
         m_transportFailures.clear();
         m_startQueue.clear();
+        m_transportFailureCount = 0;
         m_cachedConnected = 0;
         m_cachedConnectedAtMs = 0;
         m_realPlayers.clear();
@@ -625,12 +626,21 @@ namespace FakeBots
         if (bot == nullptr)
             return;
         const uint64_t generation = bot->GetGeneration();
-        for (const auto &existing : m_transportFailures)
+        for (std::size_t i = 0; i < m_transportFailureCount; ++i)
         {
+            const auto &existing = m_transportFailures[i];
             if (existing.botId == botId && existing.generation == generation)
                 return;
         }
-        m_transportFailures.push_back({botId, generation, reason});
+
+        if (m_transportFailureCount >= m_transportFailures.size())
+        {
+            sampgdk::logprintf("[FakeBots] Transport failure queue is full; could not enqueue bot %d (generation %llu).",
+                botId, static_cast<unsigned long long>(generation));
+            return;
+        }
+
+        m_transportFailures[m_transportFailureCount++] = {botId, generation, reason};
     }
 
     void BotManager::HandlePlayerRequestClass(int playerId, int classId)
@@ -814,12 +824,13 @@ namespace FakeBots
             }
         }
 
-        if (!m_transportFailures.empty())
+        if (m_transportFailureCount != 0)
         {
-            const auto failures = std::move(m_transportFailures);
-            m_transportFailures.clear();
-            for (const auto &failure : failures)
+            const std::size_t failureCount = m_transportFailureCount;
+            m_transportFailureCount = 0;
+            for (std::size_t failureIndex = 0; failureIndex < failureCount; ++failureIndex)
             {
+                const TransportFailure failure = m_transportFailures[failureIndex];
                 const int botId = failure.botId;
                 const int reason = failure.reason;
                 Bot *bot = GetByBotId(botId);
