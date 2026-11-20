@@ -364,57 +364,57 @@ namespace FakeBots
         {
             Stop(0);
 
-        if (config.host.empty() || config.port == 0 || m_name.empty())
-        {
-            m_state = State::Failed;
-            return false;
-        }
-
-        m_config = config;
-        if (m_config.authKey.empty())
-            m_config.authKey = GenerateSerial();
-
-        m_playerId = kInvalidId;
-        m_failureNotified = false;
-        m_dead = false;
-        m_playerIdAnnounced = false;
-        m_hasSynced = false;
-        m_onFootRateMs = std::clamp(m_config.defaultOnFootRateMs, kMinSyncIntervalMs, kMaxSyncIntervalMs);
-        m_inCarRateMs = std::clamp(m_config.defaultInCarRateMs, kMinSyncIntervalMs, kMaxSyncIntervalMs);
-        m_lastOnFootSyncMs = 0;
-        m_lastInCarSyncMs = 0;
-        m_lastAnySyncMs = 0;
-        m_local = SampBotLocalState{};
-
-        std::lock_guard<std::recursive_mutex> lifecycle(RakLifecycleMutex());
-        RakNet::GetTime(); // initialise RakNet's clock once, on this thread
-
-        m_client = RakNet::RakNetworkFactory::GetRakClientInterface();
-        if (m_client == nullptr)
-        {
-            m_state = State::Failed;
-            return false;
-        }
-
-        m_client->SetPassword(m_config.password.empty() ? nullptr : m_config.password.c_str());
-        RegisterRpcHandlers();
-        m_client->StopOccasionalPing();
-
-        // Connection attempts: one request per second until the limit below.
-        const uint32_t seconds = std::max<uint32_t>(3, m_config.connectTimeoutMs / 1000);
-        SAMPRakNet::SetMaxConnectionAttempts(seconds);
-
-        if (!m_client->Connect(m_config.host.c_str(), m_config.port, 0, 0, std::max(1, m_config.threadSleepMs)))
-        {
-            UnregisterRpcHandlers();
-            RakNet::RakNetworkFactory::DestroyRakClientInterface(m_client);
-            m_client = nullptr;
-            m_state = State::Failed;
-            return false;
-        }
-
-        EnterState(State::Connecting);
-        MarkStageDeadline(m_config.connectTimeoutMs + 2000);
+            if (config.host.empty() || config.port == 0 || m_name.empty())
+            {
+                m_state = State::Failed;
+                return false;
+            }
+    
+            m_config = config;
+            if (m_config.authKey.empty())
+                m_config.authKey = GenerateSerial();
+    
+            m_playerId = kInvalidId;
+            m_failureNotified = false;
+            m_dead = false;
+            m_playerIdAnnounced = false;
+            m_hasSynced = false;
+            m_onFootRateMs = std::clamp(m_config.defaultOnFootRateMs, kMinSyncIntervalMs, kMaxSyncIntervalMs);
+            m_inCarRateMs = std::clamp(m_config.defaultInCarRateMs, kMinSyncIntervalMs, kMaxSyncIntervalMs);
+            m_lastOnFootSyncMs = 0;
+            m_lastInCarSyncMs = 0;
+            m_lastAnySyncMs = 0;
+            m_local = SampBotLocalState{};
+    
+            std::lock_guard<std::recursive_mutex> lifecycle(RakLifecycleMutex());
+            RakNet::GetTime(); // initialise RakNet's clock once, on this thread
+    
+            m_client = RakNet::RakNetworkFactory::GetRakClientInterface();
+            if (m_client == nullptr)
+            {
+                m_state = State::Failed;
+                return false;
+            }
+    
+            m_client->SetPassword(m_config.password.empty() ? nullptr : m_config.password.c_str());
+            RegisterRpcHandlers();
+            m_client->StopOccasionalPing();
+    
+            // Connection attempts: one request per second until the limit below.
+            const uint32_t seconds = std::max<uint32_t>(3, m_config.connectTimeoutMs / 1000);
+            SAMPRakNet::SetMaxConnectionAttempts(seconds);
+    
+            if (!m_client->Connect(m_config.host.c_str(), m_config.port, 0, 0, std::max(1, m_config.threadSleepMs)))
+            {
+                UnregisterRpcHandlers();
+                RakNet::RakNetworkFactory::DestroyRakClientInterface(m_client);
+                m_client = nullptr;
+                m_state = State::Failed;
+                return false;
+            }
+    
+            EnterState(State::Connecting);
+            MarkStageDeadline(m_config.connectTimeoutMs + 2000);
             return true;
         }
         catch (const std::bad_alloc&)
