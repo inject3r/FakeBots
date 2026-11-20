@@ -68,8 +68,9 @@ namespace FakeBots
     //         by the server / kicked, 33 connection lost, 36 banned, 37 bad
     //         password)
     //   <= -1000 && > -2000   a stage timed out (-1000 - stage)
-    //   <= -2000              the server rejected the join (-2000 - reason):
+    //   -2001 through -2004   the server rejected the join (-2000 - reason):
     //                         1 version, 2 nickname, 3 modification, 4 no slot
+    //   -3000                 local RakNet client initialization failed
     namespace NetFail
     {
         constexpr int kAttemptFailed = 29;
