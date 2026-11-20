@@ -62,6 +62,19 @@ copies the library to `plugins/`, `FakeBots.inc` to the include folders and the 
 `plugins/FakeBots/lang/`.
 
 ## Source audit
+## Linux runtime thread-stack tuning
+
+FakeBots currently creates one RakNet network thread per bot. To keep the reserved virtual
+address space predictable in the 32-bit SA-MP/open.mp process, the Linux build requests a
+2 MiB stack for each RakNet worker by default. The effective size and the platform default are
+logged once when the first bot initializes.
+
+Set `FAKEBOTS_RAKNET_STACK_SIZE_KB` in the server environment before startup to override it.
+Accepted values are 256 through 32768 KiB; `2048` restores the default. Values below the
+platform's `PTHREAD_STACK_MIN` are rejected and fall back to the default. Smaller stacks reduce
+virtual-address reservations, not the heap memory used by each client. Benchmark your scripts
+and server workload before lowering this value.
+
 
 ```bash
 python3 tools/source_audit.py
