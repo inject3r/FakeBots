@@ -421,7 +421,7 @@ namespace FakeBots
         {
             Stop(0);
             m_state = State::Failed;
-            std::fprintf(stderr, "[FakeBots] Could not start bot '%s': memory allocation failed.\\n", m_name.c_str());
+            std::fprintf(stderr, "[FakeBots] Could not start bot '%s': memory allocation failed.\n", m_name.c_str());
             return false;
         }
     }
