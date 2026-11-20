@@ -70,7 +70,7 @@ namespace FakeBots
         struct TransportFailure { int botId; uint64_t generation; int reason; };
         std::vector<TransportFailure> m_transportFailures;
 
-        struct PendingStart { int botId; uint64_t generation; };
+        struct PendingStart { int botId; uint64_t generation; uint32_t notBeforeMs = 0; };
         std::deque<PendingStart> m_startQueue;
         int m_reservedSlots = 1;
         int m_cachedConnected = 0;
