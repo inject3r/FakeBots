@@ -15,8 +15,8 @@
 #define FAKEBOTS_NAME              "FakeBots"
 #define FAKEBOTS_VERSION_MAJOR     3
 #define FAKEBOTS_VERSION_MINOR     2
-#define FAKEBOTS_VERSION_PATCH     0
-#define FAKEBOTS_VERSION_STRING    "3.2.0"
+#define FAKEBOTS_VERSION_PATCH     1
+#define FAKEBOTS_VERSION_STRING    "3.2.1"
 #define FAKEBOTS_AUTHOR            "Abolfazl Hosseini"
 #define FAKEBOTS_REPOSITORY        "https://github.com/inject3r/FakeBots"
 
