@@ -18,6 +18,7 @@
 - This is a resource-safety and lifecycle-hardening update; it does not change the Pawn native API.
 - FakeBots still uses one RakNet network thread per bot. The configurable stack size reduces per-thread virtual-address reservations; it does not eliminate per-bot heap/packet memory or replace a shared-event-loop architecture.
 - The automated source audit and Linux x86 / Windows x86 builds are covered by GitHub Actions. This changelog does not claim a new long-duration live-server stress benchmark for maximum bot counts.
+- Release archives include the Linux x86 plugin, Windows x86 plugin, Pawn include, installation files, documentation, and a SHA-256 checksum manifest.
 
 ## 3.2.0 - A network layer that actually joins real servers
 
