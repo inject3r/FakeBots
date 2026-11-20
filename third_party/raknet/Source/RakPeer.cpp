@@ -85,14 +85,14 @@ namespace
             if (errno != 0 || end == value || *end != '\0' ||
                 stackSizeKb < 256UL || stackSizeKb > 32768UL)
             {
-                fprintf(stderr, "[FakeBots] Invalid FAKEBOTS_RAKNET_STACK_SIZE_KB='%s'; using 2048 KiB.\\n", value);
+                fprintf(stderr, "[FakeBots] Invalid FAKEBOTS_RAKNET_STACK_SIZE_KB='%s'; using 2048 KiB.\n", value);
                 return defaultStackSize;
             }
 
             const size_t requestedStackSize = static_cast<size_t>(stackSizeKb) * 1024U;
             if (requestedStackSize < static_cast<size_t>(PTHREAD_STACK_MIN))
             {
-                fprintf(stderr, "[FakeBots] Requested RakNet thread stack is below PTHREAD_STACK_MIN; using 2048 KiB.\\n");
+                fprintf(stderr, "[FakeBots] Requested RakNet thread stack is below PTHREAD_STACK_MIN; using 2048 KiB.\n");
                 return defaultStackSize;
             }
             return requestedStackSize;
@@ -102,7 +102,7 @@ namespace
 
     void LogPthreadFailure(const char* operation, int errorCode)
     {
-        fprintf(stderr, "[FakeBots] RakNet %s failed: %s (error %d).\\n",
+        fprintf(stderr, "[FakeBots] RakNet %s failed: %s (error %d).\n",
             operation, strerror(errorCode), errorCode);
     }
 }
@@ -338,7 +338,7 @@ bool RakPeer::Initialize( unsigned short maxConnections, unsigned short localPor
 				closesocket(connectionSocket);
 				connectionSocket = INVALID_SOCKET;
 			}
-			fprintf(stderr, "[FakeBots] RakNet could not allocate the remote-system table.\\n");
+			fprintf(stderr, "[FakeBots] RakNet could not allocate the remote-system table.\n");
 			return false;
 		}
 
@@ -456,7 +456,7 @@ bool RakPeer::Initialize( unsigned short maxConnections, unsigned short localPor
 			static bool stackConfigurationLogged = false;
 			if (!stackConfigurationLogged)
 			{
-				fprintf(stderr, "[FakeBots] RakNet network-thread stack: %lu KiB (pthread default: %lu KiB).\\n",
+				fprintf(stderr, "[FakeBots] RakNet network-thread stack: %lu KiB (pthread default: %lu KiB).\n",
 					static_cast<unsigned long>(configuredStackSize / 1024U),
 					static_cast<unsigned long>(platformDefaultStackSize / 1024U));
 				stackConfigurationLogged = true;
