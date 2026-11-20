@@ -5,9 +5,9 @@
 #  whose exact message is "chore(release): vX.Y.Z". Both paths audit and build the 32-bit
 #  Linux/Windows plugins, package them, and publish the GitHub release.
 #
-#  A release-preparation commit creates the matching version tag at that commit when the
-#  release is published. Ordinary master commits do not publish. "Run workflow"
-#  (workflow_dispatch) remains a build-only path and stores binaries as Actions artifacts.
+#  Master pushes run the audit; ordinary commits skip the platform builds and publishing.
+#  A release-preparation commit creates the matching version tag at that commit.
+#  "Run workflow" (workflow_dispatch) remains a build-only path and stores binaries as artifacts.
 #
 #  Publishing uses the job-scoped GITHUB_TOKEN with contents: write; no personal token secret
 #  is required.
@@ -20,10 +20,6 @@ on:
       - master
     tags:
       - "*"
-    paths:
-      - "src/core/Common.h"
-      - "CHANGELOG.md"
-      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 # Build/audit jobs are read-only; only the publish job receives contents: write.
@@ -72,6 +68,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-linux:
     name: Build (Linux x86)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: audit
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -107,6 +104,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-windows:
     name: Build (Windows x86)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && startsWith(github.event.head_commit.message, 'chore(release): v'))
     needs: audit
     runs-on: ubuntu-24.04
     timeout-minutes: 20
